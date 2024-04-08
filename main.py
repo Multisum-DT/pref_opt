@@ -130,6 +130,7 @@ if __name__ == '__main__':
         load_in_4bit = True,
         cache_dir = '/data2/brian/.cache'
     )
+    tokenizer.pad_token = tokenizer.eos_token
 
     # if args.use_flash_attn:
     #     from utils.llama_patch import upcast_layer_for_flash_attention
