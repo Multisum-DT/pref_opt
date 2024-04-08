@@ -128,7 +128,7 @@ if __name__ == '__main__':
         cache_dir = '/data2/brian/.cache'
     )
     tokenizer.pad_token = tokenizer.eos_token
-    # tokenizer.chat_template = chat_template
+    
 
     # if args.use_flash_attn:
     #     from utils.llama_patch import upcast_layer_for_flash_attention
