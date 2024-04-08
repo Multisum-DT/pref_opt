@@ -88,17 +88,14 @@ if __name__ == '__main__':
     
     if args.model == 'mistral':
         model_path = 'mistralai/Mistral-7B-v0.1'
-    elif args.model == 'llama13b':
-        model_path = 'meta-llama/Llama-2-13b-hf'
     else:
-        model_path = 'meta-llama/Llama-2-7b-hf'
+        # model_path = 'meta-llama/Llama-2-7b-hf'
+        model_path = 'microsoft/phi-2'
     
     # load dataset
 
-    chat_template = None # TODO
-    tokenizer = AutoTokenizer.from_pretrained(model_path, cache_dir = '/data2/brian/.cache')
-    tokenizer.pad_token = tokenizer.eos_token
-    tokenizer.chat_template = chat_template
+    # chat_template = None # TODO
+    # tokenizer = AutoTokenizer.from_pretrained(model_path, cache_dir = '/data2/brian/.cache')
         
     # load bitsandbytes if inference
     # if not args.train:
@@ -130,6 +127,8 @@ if __name__ == '__main__':
         load_in_4bit = True,
         cache_dir = '/data2/brian/.cache'
     )
+    tokenizer.pad_token = tokenizer.eos_token
+    # tokenizer.chat_template = chat_template
 
     # if args.use_flash_attn:
     #     from utils.llama_patch import upcast_layer_for_flash_attention
@@ -177,7 +176,7 @@ if __name__ == '__main__':
             './wmt14/wmt_utils.py',
             language_pair = ('fr', 'en'),
             subsets = {
-                datasets.Split.TRAIN: ["newscommentary_v10"],
+                datasets.Split.TRAIN: ["europarl_v7"],
                 datasets.Split.VALIDATION: ['newstest2013'],
                 datasets.Split.TEST: ['newstest2014']
             },
@@ -185,7 +184,7 @@ if __name__ == '__main__':
         )
         builder.download_and_prepare(verification_mode=VerificationMode.NO_CHECKS)
         dataset = builder.as_dataset()
-        train_dataset = Dataset.load_from_disk('/data2/brian/personal/translation/sent-data/hf') # TODO: only europarl
+        train_dataset = dataset['train']
         eval_dataset = dataset['validation']
         test_dataset = dataset['test']
         del builder, dataset
@@ -194,8 +193,6 @@ if __name__ == '__main__':
         train_dataset = Dataset.load_from_disk('/data2/brian/personal/translation/doc-data/hf')
         # TODO: construct doc level eval and test dataset
         
-    
-
     # create trainer for peft model
     time_now = datetime.today().strftime('%m%d%H%M')
     total_update_steps=int((len(train_dataset)*args.epochs)/(args.batch_size*args.gradient_accumulation_steps))

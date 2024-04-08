@@ -2,3 +2,4 @@ checkpoints
 data
 wandb
 wmt14
+toy_main.py
