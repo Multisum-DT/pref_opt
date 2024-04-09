@@ -26,6 +26,8 @@ from transformers import (
 from trl import SFTTrainer, RewardTrainer
 from unsloth import FastLanguageModel
 
+from utils import *
+
 def seed_everything(seed: int = 42):
     random.seed(seed)
     np.random.seed(seed)
@@ -55,6 +57,7 @@ def parse_args():
     parser.add_argument("--model",type=str,default="mistral",help="Name of the model to be used")
     parser.add_argument("--train", action = 'store_true',help="Train model or only evaluate")
     parser.add_argument("--ckpt_dir",type=str,default=None)
+    parser.add_argument("--level", type = str, default = 'sentence')
     # parser.add_argument("--mlflow_dir",type=str, default="mlruns")
 
     ## hyper parameters
@@ -176,7 +179,7 @@ if __name__ == '__main__':
             './wmt14/wmt_utils.py',
             language_pair = ('fr', 'en'),
             subsets = {
-                datasets.Split.TRAIN: ["europarl_v7"],
+                datasets.Split.TRAIN: ["europarl_v7", "newscommentary_v9"],
                 datasets.Split.VALIDATION: ['newstest2013'],
                 datasets.Split.TEST: ['newstest2014']
             },
@@ -232,7 +235,7 @@ if __name__ == '__main__':
     os.environ["WANDB_API_KEY"] = 'e0079cf04794e1722592862727127f5711144304'
     wandb.init(
         # set the wandb project where this run will be logged
-        project="dolly-test",
+        project="translation-test",
         
         # track hyperparameters and run metadata
         config=training_args.__dict__
@@ -248,9 +251,9 @@ if __name__ == '__main__':
         max_seq_length=args.max_len,
         tokenizer=tokenizer,
         # packing=True,
-        dataset_text_field='text',
+        # dataset_text_field='text',
         args = training_args,
-        # formatting_func=format_instruction, 
+        formatting_func=return_prompt_and_responses, 
     )
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)

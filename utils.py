@@ -36,8 +36,11 @@ def source_dataset(dataset_path):
 
     return dataset
 
-def return_prompt_and_responses(samples): 
-    samples['text']="###input: " + samples['translation']['en'] + "###instruction: Please translate the input English sentence into French" + "###output:" + samples['translation']['fr']
+def return_prompt_and_responses(batch):
+    # samples['text']="###input: " + samples['translation']['fr'] + "###instruction: Please translate the input French sentence into English" + "###output:" + samples['translation']['en']
+    samples = []
+    for i in range(len(batch['translation'])):
+       samples.append(f"### Instruction: Please translate the input sentence written in French to English\n### Input: {batch['translation'][i]['fr']}\n### Output: {batch['translation'][i]['en']}")
     return samples
 
 def return_prompt_and_responses_dpo(samples):

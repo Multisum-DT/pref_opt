@@ -1,0 +1,17 @@
+CUDA_VISIBLE_DEVICES=1 python main.py \
+    --model=mistral \
+    --train \
+    --seed=42 \
+    --level=sentence \
+    --epochs=1 \
+    --max_len=4096 \
+    --lora_r=32 \
+    --lora_alpha=64 \
+    --dropout=0.1 \
+    --batch_size=16 \
+    --warmup_ratio=0.1 \
+    --learning_rate=4e-5 \
+    --weight_decay=0.01 \
+    --num_save_per_epoch=3 \
+    --gradient_accumulation_steps=1 \
+    --gradient_checkpointing
