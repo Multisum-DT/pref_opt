@@ -1,12 +1,13 @@
 import argparse
 import gc
+import re
 import os
 import random
 import numpy as np
 import torch
 import wandb
 import datasets
-
+import evaluate
 from datetime import datetime
 
 from datasets import load_dataset, load_dataset_builder, Dataset, VerificationMode
@@ -25,8 +26,41 @@ from transformers import (
 )
 from trl import SFTTrainer, RewardTrainer
 from unsloth import FastLanguageModel
-
+from datasets import load_metric
 from utils import *
+
+def compute_metrics(eval_preds):
+    def split_input_output(string):
+        span = re.match("### Instruction: .*?\n### Input: .*?\n### Output: ", string).span()
+        return string[:span[-1]], string[span[-1]:]
+    
+    preds, labels = eval_preds.predictions, eval_preds.label_ids
+    # In case the model returns more than the prediction logits 
+    if isinstance(preds, tuple):
+        preds = preds[0]
+    preds = preds.argmax(-1)
+    import ipdb; ipdb.set_trace()
+    preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
+    decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+    
+    # Replace -100s in the labels as we can't decode them
+    labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+    decoded_labels = tokenizer.batch_decode(labels, skip_spacial_tokens=True)
+    decoded_inputs, decoded_labels = zip(*list(map(split_input_output, decoded_labels)))
+    
+    # Some simple post-processing 
+    decoded_preds = [pred.strip() for pred in decoded_preds]
+    decoded_labels = [label.strip() for label in decoded_labels]
+    decoded_inputs = [input_id.strip() for input_id in decoded_inputs]
+    
+    # Multiple metrics
+    mt_metrics = evaluate.combine(["bleu", "comet", "chrf", "ter", "bleurt", "google_bleu", "rouge", "meteor"])
+    results = mt_metrics.compute(predictions = decoded_preds, references = decoded_labels, sources = decoded_inputs)
+
+    # SacredBLEU
+    metric = load_metric("sacrebleu")
+    results['sacredblue'] = metric.compute(predictions=decoded_preds, references=decoded_labels)
+    return results
 
 def seed_everything(seed: int = 42):
     random.seed(seed)
@@ -130,7 +164,7 @@ if __name__ == '__main__':
         load_in_4bit = True,
         cache_dir = '/data2/brian/.cache'
     )
-    tokenizer.pad_token = tokenizer.eos_token
+    tokenizer.pad_token = tokenizer.unk_token
     
 
     # if args.use_flash_attn:
@@ -218,6 +252,7 @@ if __name__ == '__main__':
         group_by_length=True, # pad batches by its group, more efficient
         load_best_model_at_end=True,
         report_to = 'wandb',
+        include_inputs_for_metrics=True,
         # disable_tqdm=False,  # disable tqdm since with packing values are in correct
     )
 
@@ -228,7 +263,7 @@ if __name__ == '__main__':
                                                  sampler_seed=args.seed)
     training_args = training_args.set_lr_scheduler(name='cosine', num_epochs=args.epochs, warmup_ratio=args.warmup_ratio,)
     training_args = training_args.set_optimizer(name='paged_adamw_8bit', learning_rate=args.learning_rate, weight_decay=args.weight_decay,)
-    training_args = training_args.set_evaluate(strategy = 'steps', steps = eval_steps, delay = 0, batch_size = args.batch_size)
+    training_args = training_args.set_evaluate(strategy = 'steps', steps = 1, delay = 0, accumulation_steps=25, batch_size = args.batch_size)
     training_args = training_args.set_save(strategy="steps", steps = eval_steps, total_limit=10)
     training_args = training_args.set_logging(strategy="steps", steps=eval_steps, report_to = ['wandb'])
     
@@ -247,6 +282,7 @@ if __name__ == '__main__':
         model=model,
         train_dataset=train_dataset,
         eval_dataset=eval_dataset,
+        compute_metrics=compute_metrics,
         # peft_config=peft_config,
         max_seq_length=args.max_len,
         tokenizer=tokenizer,
@@ -259,7 +295,7 @@ if __name__ == '__main__':
         os.makedirs(output_dir, exist_ok=True)
 
     if args.ckpt_dir:
-        trainer.train(args.ckpr_dir)
+        trainer.train(args.ckpt_dir)
     else:
         trainer.train()
 
