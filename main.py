@@ -31,21 +31,24 @@ from utils import *
 
 def compute_metrics(eval_preds):
     def split_input_output(string):
-        span = re.match("### Instruction: .*?\n### Input: .*?\n### Output: ", string).span()
-        return string[:span[-1]], string[span[-1]:]
+        input_label = string.split('### Input: ')[-1]
+        input_str, label_str = input_label.split('### Output: ')
+        return input_str.strip(), label_str.strip()
     
     preds, labels = eval_preds.predictions, eval_preds.label_ids
     # In case the model returns more than the prediction logits 
     if isinstance(preds, tuple):
         preds = preds[0]
     preds = preds.argmax(-1)
-    import ipdb; ipdb.set_trace()
+    # import ipdb; ipdb.set_trace()
     preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
     decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
+    decoded_preds = list(map(lambda x: x.split('### Output: ')[-1].strip(), decoded_preds))
     
     # Replace -100s in the labels as we can't decode them
     labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
     decoded_labels = tokenizer.batch_decode(labels, skip_spacial_tokens=True)
+    decoded_labels = [re.sub('<.*>', '', label).strip() for label in decoded_labels]
     decoded_inputs, decoded_labels = zip(*list(map(split_input_output, decoded_labels)))
     
     # Some simple post-processing 
@@ -54,13 +57,17 @@ def compute_metrics(eval_preds):
     decoded_inputs = [input_id.strip() for input_id in decoded_inputs]
     
     # Multiple metrics
-    mt_metrics = evaluate.combine(["bleu", "comet", "chrf", "ter", "bleurt", "google_bleu", "rouge", "meteor"])
-    results = mt_metrics.compute(predictions = decoded_preds, references = decoded_labels, sources = decoded_inputs)
+    metric = evaluate.combine(['sacrebleu', 'chrf'])
+    metric_result = metric.compute(predictions = decoded_preds, references = decoded_labels)
+    comet = evaluate.load('comet')
+    metric_result['comet'] = comet.compute(predictions = decoded_preds, references = decoded_labels, sources = decoded_inputs)['mean_score']
+    # mt_metrics = evaluate.combine(["comet", "ter", "bleurt", "google_bleu", "rouge", "meteor"])
+    # results = mt_metrics.compute(predictions = decoded_preds, references = decoded_labels, sources = decoded_inputs)
 
-    # SacredBLEU
-    metric = load_metric("sacrebleu")
-    results['sacredblue'] = metric.compute(predictions=decoded_preds, references=decoded_labels)
-    return results
+    # SacreBLEU
+    # metric = load_metric("sacrebleu")
+    # bleu_result = metric.compute(predictions=decoded_preds, references=decoded_labels)
+    return metric_result
 
 def seed_everything(seed: int = 42):
     random.seed(seed)
@@ -263,7 +270,7 @@ if __name__ == '__main__':
                                                  sampler_seed=args.seed)
     training_args = training_args.set_lr_scheduler(name='cosine', num_epochs=args.epochs, warmup_ratio=args.warmup_ratio,)
     training_args = training_args.set_optimizer(name='paged_adamw_8bit', learning_rate=args.learning_rate, weight_decay=args.weight_decay,)
-    training_args = training_args.set_evaluate(strategy = 'steps', steps = 1, delay = 0, accumulation_steps=25, batch_size = args.batch_size)
+    training_args = training_args.set_evaluate(strategy = 'steps', steps = eval_steps, delay = 0, accumulation_steps=25, batch_size = args.batch_size)
     training_args = training_args.set_save(strategy="steps", steps = eval_steps, total_limit=10)
     training_args = training_args.set_logging(strategy="steps", steps=eval_steps, report_to = ['wandb'])
     
