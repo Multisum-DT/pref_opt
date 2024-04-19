@@ -30,11 +30,6 @@ from datasets import load_metric
 from utils import *
 
 def compute_metrics(eval_preds):
-    def split_input_output(string):
-        input_label = string.split('### Input: ')[-1]
-        input_str, label_str = input_label.split('### Output: ')
-        return input_str.strip(), label_str.strip()
-    
     preds, labels = eval_preds.predictions, eval_preds.label_ids
     # In case the model returns more than the prediction logits 
     if isinstance(preds, tuple):
@@ -43,13 +38,19 @@ def compute_metrics(eval_preds):
     # import ipdb; ipdb.set_trace()
     preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
     decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
-    decoded_preds = list(map(lambda x: x.split('### Output: ')[-1].strip(), decoded_preds))
+    decoded_preds = list(map(lambda x: x.split('[/INST]')[-1].strip(), decoded_preds))
     
     # Replace -100s in the labels as we can't decode them
     labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
     decoded_labels = tokenizer.batch_decode(labels, skip_spacial_tokens=True)
+    decoded_inputs, decoded_labels = decoded_labels.split('[/INST]')
+
+    # Remove any special tokens that are not removed by tokenizer
     decoded_labels = [re.sub('<.*>', '', label).strip() for label in decoded_labels]
-    decoded_inputs, decoded_labels = zip(*list(map(split_input_output, decoded_labels)))
+
+    # Extract the original sentence from the input message to be used for COMET
+    sys_prompt = 'You are a translator. Translate the sentence in French to English. Do not continue writing with anything that is unrelated to the given sentence.'
+    decoded_inputs = decoded_inputs.replace('<<SYS>>', '').replace('<s>[INST] ', '').replace(sys_prompt, '').strip()
     
     # Some simple post-processing 
     decoded_preds = [pred.strip() for pred in decoded_preds]
@@ -61,12 +62,7 @@ def compute_metrics(eval_preds):
     metric_result = metric.compute(predictions = decoded_preds, references = decoded_labels)
     comet = evaluate.load('comet')
     metric_result['comet'] = comet.compute(predictions = decoded_preds, references = decoded_labels, sources = decoded_inputs)['mean_score']
-    # mt_metrics = evaluate.combine(["comet", "ter", "bleurt", "google_bleu", "rouge", "meteor"])
-    # results = mt_metrics.compute(predictions = decoded_preds, references = decoded_labels, sources = decoded_inputs)
-
-    # SacreBLEU
-    # metric = load_metric("sacrebleu")
-    # bleu_result = metric.compute(predictions=decoded_preds, references=decoded_labels)
+    
     return metric_result
 
 def seed_everything(seed: int = 42):
