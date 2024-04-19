@@ -36,11 +36,25 @@ def source_dataset(dataset_path):
 
     return dataset
 
+def apply_chat_template_llama(batch):
+    samples = []
+    system_message = "You are a translator. Translate the sentence in French to English. Do not continue writing with anything that is unrelated to the given sentence."
+    for i in range(len(batch['translation'])):
+       samples.append(f"""<s>[INST] <<SYS>>\n{system_message}\n<</SYS>>\n\n{batch['translation'][i]['fr']} [/INST]{batch['translation'][i]['en']}</s>""")
+    return samples
+
+def apply_chat_template_mistral(batch):
+   sys_prompt = 'You are a translator. Translate the sentence in French to English. Do not continue writing with anything that is unrelated to the given sentence.'
+   samples = []
+   for i in range(len(batch['translation'])):
+      samples.append(f"<s>[INST] {sys_prompt} {batch['translation'][i]['fr']} [/INST] {batch['translation'][i]['en']}</s>")
+   return samples
+
 def return_prompt_and_responses(batch):
     # samples['text']="###input: " + samples['translation']['fr'] + "###instruction: Please translate the input French sentence into English" + "###output:" + samples['translation']['en']
     samples = []
     for i in range(len(batch['translation'])):
-       samples.append(f"### Instruction: Please translate the input sentence written in French to English\n### Input: {batch['translation'][i]['fr']}\n### Output: {batch['translation'][i]['en']}")
+       samples.append(f"<s>### Instruction: Please translate the input sentence written in French to English\n### Input: {batch['translation'][i]['fr']}\n### Output: {batch['translation'][i]['en']}<\s>")
     return samples
 
 def return_prompt_and_responses_dpo(samples):
