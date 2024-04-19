@@ -117,6 +117,7 @@ def parse_args():
     parser.add_argument("--num_save_per_epoch",type=int,default=3,help="number of saving(evaluating) per a epoch")
     parser.add_argument("--gradient_accumulation_steps",type=int,default=1)
     parser.add_argument("--gradient_checkpointing", action='store_true',help="reduces required memory size but slows training")
+    parser.add_argument("--eval_accumulation_steps", type=int, default = 0, help="reduces required memory size but slows training")
     # parser.add_argument("--full_ft",action="store_true",help="full finetuning otherwise lora")
     # parser.add_argument("--chat_template", type=str,required=True,help="jinja chat template")
     
@@ -270,7 +271,7 @@ if __name__ == '__main__':
                                                  sampler_seed=args.seed)
     training_args = training_args.set_lr_scheduler(name='cosine', num_epochs=args.epochs, warmup_ratio=args.warmup_ratio,)
     training_args = training_args.set_optimizer(name='paged_adamw_8bit', learning_rate=args.learning_rate, weight_decay=args.weight_decay,)
-    training_args = training_args.set_evaluate(strategy = 'steps', steps = eval_steps, delay = 0, accumulation_steps=25, batch_size = args.batch_size)
+    training_args = training_args.set_evaluate(strategy = 'steps', steps = eval_steps, delay = 0, accumulation_steps=args.eval_accumulation_steps, batch_size = args.batch_size)
     training_args = training_args.set_save(strategy="steps", steps = eval_steps, total_limit=10)
     training_args = training_args.set_logging(strategy="steps", steps=eval_steps, report_to = ['wandb'])
     
