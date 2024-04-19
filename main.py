@@ -35,23 +35,27 @@ def compute_metrics(eval_preds):
     if isinstance(preds, tuple):
         preds = preds[0]
     preds = preds.argmax(-1)
-    # import ipdb; ipdb.set_trace()
     preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
     decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
     decoded_preds = list(map(lambda x: x.split('[/INST]')[-1].strip(), decoded_preds))
     
+    def split_input_output(string):
+        input_str, label_str = string.split('[/INST]')
+
+        # Extract the original sentence from the input message to be used for COMET
+        sys_prompt = 'You are a translator. Translate the sentence in French to English. Do not continue writing with anything that is unrelated to the given sentence.'
+        input_str = input_str.replace('<<SYS>>', '').replace('<s><s> [INST] ', '').replace(sys_prompt, '').strip()
+        
+        # Remove any special tokens that are not removed by tokenizer
+        label_str = re.sub('<.*>', '', label_str).strip()
+        return input_str, label_str
+
     # Replace -100s in the labels as we can't decode them
     labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+    import ipdb; ipdb.set_trace()
     decoded_labels = tokenizer.batch_decode(labels, skip_spacial_tokens=True)
-    decoded_inputs, decoded_labels = decoded_labels.split('[/INST]')
+    decoded_inputs, decoded_labels = zip(*list(map(split_input_output, decoded_labels)))
 
-    # Remove any special tokens that are not removed by tokenizer
-    decoded_labels = [re.sub('<.*>', '', label).strip() for label in decoded_labels]
-
-    # Extract the original sentence from the input message to be used for COMET
-    sys_prompt = 'You are a translator. Translate the sentence in French to English. Do not continue writing with anything that is unrelated to the given sentence.'
-    decoded_inputs = decoded_inputs.replace('<<SYS>>', '').replace('<s>[INST] ', '').replace(sys_prompt, '').strip()
-    
     # Some simple post-processing 
     decoded_preds = [pred.strip() for pred in decoded_preds]
     decoded_labels = [label.strip() for label in decoded_labels]
@@ -128,7 +132,7 @@ if __name__ == '__main__':
     seed_everything(args.seed)
     
     if args.model == 'mistral':
-        model_path = 'mistralai/Mistral-7B-v0.1'
+        model_path = 'mistralai/Mistral-7B-Instruct-v0.2'
     else:
         # model_path = 'meta-llama/Llama-2-7b-hf'
         model_path = 'microsoft/phi-2'
@@ -293,7 +297,7 @@ if __name__ == '__main__':
         # packing=True,
         # dataset_text_field='text',
         args = training_args,
-        formatting_func=return_prompt_and_responses, 
+        formatting_func=apply_chat_template_mistral, 
     )
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
