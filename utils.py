@@ -50,6 +50,20 @@ def apply_chat_template_mistral(batch):
       samples.append(f"<s>[INST] {sys_prompt} {batch['translation'][i]['fr']} [/INST] {batch['translation'][i]['en']}</s>")
    return samples
 
+def apply_chat_template_tinyllama(batch):
+   sys_prompt = 'You are a translator. Translate the sentence in French to English. Do not continue writing with anything that is unrelated to the given sentence.'
+   samples = []
+   for i in range(len(batch['translation'])):
+      samples.append(f"<|system|>\n{sys_prompt}</s>\n<|user|>\n{batch['translation'][i]['fr']}</s>\n<|assistant|>\n{batch['translation'][i]['en']}</s>")
+   return samples
+
+def apply_chat_template_llama3(batch):
+   sys_prompt = 'You are a translator. Translate the sentence in French to English. Do not continue writing with anything that is unrelated to the given sentence.'
+   samples = []
+   for i in range(len(batch['translation'])):
+      samples.append(f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{sys_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{batch['translation'][i]['fr']}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{batch['translation'][i]['en']}")
+   return samples
+
 def return_prompt_and_responses(batch):
     # samples['text']="###input: " + samples['translation']['fr'] + "###instruction: Please translate the input French sentence into English" + "###output:" + samples['translation']['en']
     samples = []

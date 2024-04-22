@@ -35,17 +35,16 @@ MODEL_MAPPER = {'mistral': 'mistralai/Mistral-7B-Instruct-v0.2',
                 'gemma': 'google/gemma-7b', 
                 'bloomz7b': 'bigscience/bloomz-7b1',
                 'bloomz1b': 'bigscience/bloomz-1b7',
-                'opt': 'facebook/opt-1.3b',
                 'tinyllama': 'TinyLlama/TinyLlama-1.1B-Chat-v1.0',
-                'llama3': 'meta-llama/Meta-Llama-3-8B-Instruct'
+                'llama3': 'meta-llama/Meta-Llama-3-8B-Instruct',
 }
 CHAT_TEMPLATE_MAPPER = {'mistral': apply_chat_template_mistral,
                         'llama': apply_chat_template_llama, 
-                        'gemma': None, 
-                        'bloomz7b': None,
-                        'bloomz1b': None,
-                        'opt': None,
-                        'tinyllama': None,
+                        'gemma': apply_chat_template_mistral, 
+                        'bloomz7b': apply_chat_template_mistral,
+                        'bloomz1b': apply_chat_template_mistral,
+                        'tinyllama': apply_chat_template_tinyllama,
+                        'llama3': apply_chat_template_llama3,
                         }
 
 
@@ -151,8 +150,7 @@ def get_tok_and_model(model_path):
         model = FastLanguageModel.get_peft_model(
             model,
             r = args.lora_r,
-            target_modules = ["q_proj", "k_proj", "v_proj", "o_proj",
-                            "gate_proj", "up_proj", "down_proj",],
+            target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"],
             lora_alpha = args.lora_alpha,
             lora_dropout = args.dropout, # Supports any, but = 0 is optimized
             bias = "none",    # Supports any, but = "none" is optimized
@@ -236,7 +234,7 @@ def get_trainer(tokenizer, model, args):
         evaluation_strategy='steps',
         metric_for_best_model='eval_loss',
         # per_device_train_batch_size=4,
-        gradient_accumulation_steps=2,
+        gradient_accumulation_steps=args.gradient_accumulation_steps,
         gradient_checkpointing=True if args.gradient_checkpointing else False,
         bf16=False, # bf16 is not supported by non-Ampere GPUs
         fp16=True,
@@ -335,7 +333,6 @@ if __name__ == '__main__':
 
     # get trainer
     trainer = get_trainer(tokenizer, model, args)
-    
 
     if args.ckpt_dir:
         trainer.train(args.ckpt_dir)
