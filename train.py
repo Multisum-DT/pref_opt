@@ -46,14 +46,6 @@ CHAT_TEMPLATE_MAPPER = {'mistral': apply_chat_template_mistral,
                         'tinyllama': apply_chat_template_tinyllama,
                         'llama3': apply_chat_template_llama3,
                         }
-LAYER_MAPPER = {'mistral': ["q_proj", "k_proj", "v_proj", "o_proj"],
-                'llama2': ["q_proj", "k_proj", "v_proj", "o_proj"],
-                'gemma': ["q_proj", "k_proj", "v_proj", "o_proj"],
-                'bloomz7b': ["query_key_value", "dense"],
-                'bloomz1b': ["query_key_value", "dense"],
-                'tinyllama': ["q_proj", "k_proj", "v_proj", "o_proj"],
-                'llama3': ["q_proj", "k_proj", "v_proj", "o_proj"],                
-                }
 
 def compute_metrics(eval_preds):
     def split_input_output(string):
