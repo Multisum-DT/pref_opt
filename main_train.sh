@@ -1,0 +1,19 @@
+CUDA_VISIBLE_DEVICES=1 python train.py \
+    --model=llama3 \
+    --train_mode=sft \
+    --seed=42 \
+    --level=sentence \
+    --epochs=1 \
+    --max_len=4096 \
+    --lora_r=64 \
+    --lora_alpha=32 \
+    --dropout=0.05 \
+    --batch_size=16 \
+    --warmup_ratio=0.1 \
+    --learning_rate=2e-4 \
+    --weight_decay=0.01 \
+    --num_save_per_epoch=100 \
+    --gradient_accumulation_steps=1 \
+    --eval_accumulation_steps=10 \
+    --gradient_checkpointing \
+    # --ckpt_dir="/data2/brian/personal/translation/checkpoints/mistral_04092203/checkpoint-50505"
