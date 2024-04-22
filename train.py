@@ -31,13 +31,14 @@ from utils import *
 
 os.environ["WANDB_API_KEY"] = 'e0079cf04794e1722592862727127f5711144304'
 MODEL_MAPPER = {'mistral': 'mistralai/Mistral-7B-Instruct-v0.2', 
-                'llama': 'meta-llama/Llama-2-7b-chat-hf', 
+                'llama2': 'meta-llama/Llama-2-7b-chat-hf', 
                 'gemma': 'google/gemma-7b', 
                 'bloomz7b': 'bigscience/bloomz-7b1',
                 'bloomz1b': 'bigscience/bloomz-1b7',
                 'opt': 'facebook/opt-1.3b',
                 'tinyllama': 'TinyLlama/TinyLlama-1.1B-Chat-v1.0',
-                }
+                'llama3': 'meta-llama/Meta-Llama-3-8B-Instruct'
+}
 CHAT_TEMPLATE_MAPPER = {'mistral': apply_chat_template_mistral,
                         'llama': apply_chat_template_llama, 
                         'gemma': None, 
@@ -110,7 +111,7 @@ def parse_args():
     parser = argparse.ArgumentParser()
     
     ## directories
-    parser.add_argument("--model",type=str, choices = ['mistral', 'llama', 'gemma', 'bloomz7b', 'bloomz1b', 'opt', 'tinyllama'],
+    parser.add_argument("--model",type=str, choices = ['mistral', 'llama2', 'gemma', 'bloomz7b', 'bloomz1b', 'opt', 'tinyllama', 'llama3'],
                         default="mistral",help="Name of the model to be used")
     parser.add_argument("--train_mode", type=str, choices = ['sft', 'dpo', 'cpo', 'orpo'],
                         default = 'sft', help="Type of training to be used")
@@ -187,8 +188,7 @@ def get_tok_and_model(model_path):
             lora_dropout=args.dropout,
             bias = 'none',
             task_type = 'CAUSAL_LM',
-            target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj', 
-                              'gate_proj', 'up_proj', 'down_proj']
+            target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj']
         )
         
         model.config.use_cache = False # use_cache is only for infernce
@@ -255,7 +255,7 @@ def get_trainer(tokenizer, model, args):
                                                  sampler_seed=args.seed)
     training_args = training_args.set_lr_scheduler(name='cosine', num_epochs=args.epochs, warmup_ratio=args.warmup_ratio,)
     training_args = training_args.set_optimizer(name='paged_adamw_8bit', learning_rate=args.learning_rate, weight_decay=args.weight_decay,)
-    training_args = training_args.set_evaluate(strategy = 'steps', steps = eval_steps, delay = 0, accumulation_steps=args.eval_accumulation_steps, batch_size = args.batch_size)
+    training_args = training_args.set_evaluate(strategy = 'steps', steps = 1, delay = 0, accumulation_steps=args.eval_accumulation_steps, batch_size = args.batch_size)
     training_args = training_args.set_save(strategy="steps", steps = eval_steps, total_limit=10)
     training_args = training_args.set_logging(strategy="steps", steps=eval_steps, report_to = ['wandb'])
     
@@ -285,9 +285,7 @@ def get_trainer(tokenizer, model, args):
             formatting_func=CHAT_TEMPLATE_MAPPER[args.model], 
         )
     elif args.train_mode == 'cpo':
-        trainer = CPOTrainer(
-            
-        )
+        pass # TODO
     elif args.train_mode == 'orpo':
         trainer = ORPOTrainer(
             model=model,
