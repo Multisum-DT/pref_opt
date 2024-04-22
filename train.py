@@ -37,23 +37,30 @@ MODEL_MAPPER = {'mistral': 'mistralai/Mistral-7B-Instruct-v0.2',
                 'bloomz1b': 'bigscience/bloomz-1b7',
                 'tinyllama': 'TinyLlama/TinyLlama-1.1B-Chat-v1.0',
                 'llama3': 'meta-llama/Meta-Llama-3-8B-Instruct',
-}
+                }
 CHAT_TEMPLATE_MAPPER = {'mistral': apply_chat_template_mistral,
-                        'llama': apply_chat_template_llama, 
+                        'llama2': apply_chat_template_llama, 
                         'gemma': apply_chat_template_mistral, 
                         'bloomz7b': apply_chat_template_mistral,
                         'bloomz1b': apply_chat_template_mistral,
                         'tinyllama': apply_chat_template_tinyllama,
                         'llama3': apply_chat_template_llama3,
                         }
-
+LAYER_MAPPER = {'mistral': ["q_proj", "k_proj", "v_proj", "o_proj"],
+                'llama2': ["q_proj", "k_proj", "v_proj", "o_proj"],
+                'gemma': ["q_proj", "k_proj", "v_proj", "o_proj"],
+                'bloomz7b': ["query_key_value", "dense"],
+                'bloomz1b': ["query_key_value", "dense"],
+                'tinyllama': ["q_proj", "k_proj", "v_proj", "o_proj"],
+                'llama3': ["q_proj", "k_proj", "v_proj", "o_proj"],                
+                }
 
 def compute_metrics(eval_preds):
     def split_input_output(string):
         input_label = string.split('### Input: ')[-1]
         input_str, label_str = input_label.split('### Output: ')
         return input_str.strip(), label_str.strip()
-    
+    import ipdb; ipdb.set_trace()
     preds, labels = eval_preds.predictions, eval_preds.label_ids
     # In case the model returns more than the prediction logits 
     if isinstance(preds, tuple):
@@ -116,7 +123,6 @@ def parse_args():
                         default = 'sft', help="Type of training to be used")
     parser.add_argument("--ckpt_dir",type=str,default=None)
     parser.add_argument("--level", type = str, default = 'sentence')
-    # parser.add_argument("--mlflow_dir",type=str, default="mlruns")
 
     ## hyper parameters
     parser.add_argument("--seed",type=int,default=42)
@@ -150,7 +156,7 @@ def get_tok_and_model(model_path):
         model = FastLanguageModel.get_peft_model(
             model,
             r = args.lora_r,
-            target_modules = ["q_proj", "k_proj", "v_proj", "o_proj"],
+            target_modules = ["query_key_value", "dense"] if 'bloomz' in args.model else ["q_proj", "k_proj", "v_proj", "o_proj"],
             lora_alpha = args.lora_alpha,
             lora_dropout = args.dropout, # Supports any, but = 0 is optimized
             bias = "none",    # Supports any, but = "none" is optimized
@@ -186,7 +192,7 @@ def get_tok_and_model(model_path):
             lora_dropout=args.dropout,
             bias = 'none',
             task_type = 'CAUSAL_LM',
-            target_modules = ['q_proj', 'k_proj', 'v_proj', 'o_proj']
+            target_modules = ["query_key_value", "dense"] if 'bloomz' in args.model else ["q_proj", "k_proj", "v_proj", "o_proj"],
         )
         
         model.config.use_cache = False # use_cache is only for infernce
@@ -250,7 +256,8 @@ def get_trainer(tokenizer, model, args):
                                                  eval_batch_size=args.batch_size,
                                                  pin_memory=True,
                                                  num_workers=4,
-                                                 sampler_seed=args.seed)
+                                                 sampler_seed=args.seed,
+                                                 auto_find_batch_size=True,)
     training_args = training_args.set_lr_scheduler(name='cosine', num_epochs=args.epochs, warmup_ratio=args.warmup_ratio,)
     training_args = training_args.set_optimizer(name='paged_adamw_8bit', learning_rate=args.learning_rate, weight_decay=args.weight_decay,)
     training_args = training_args.set_evaluate(strategy = 'steps', steps = 1, delay = 0, accumulation_steps=args.eval_accumulation_steps, batch_size = args.batch_size)
@@ -274,11 +281,8 @@ def get_trainer(tokenizer, model, args):
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             compute_metrics=compute_metrics,
-            # peft_config=peft_config,
             max_seq_length=args.max_len,
             tokenizer=tokenizer,
-            # packing=True,
-            # dataset_text_field='text',
             args = training_args,
             formatting_func=CHAT_TEMPLATE_MAPPER[args.model], 
         )
@@ -290,11 +294,8 @@ def get_trainer(tokenizer, model, args):
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             compute_metrics=compute_metrics,
-            # peft_config=peft_config,
             max_seq_length=args.max_len,
             tokenizer=tokenizer,
-            # packing=True,
-            # dataset_text_field='text',
             args = training_args,
             formatting_func=CHAT_TEMPLATE_MAPPER[args.model],
         )
@@ -304,11 +305,8 @@ def get_trainer(tokenizer, model, args):
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
             compute_metrics=compute_metrics,
-            # peft_config=peft_config,
             max_seq_length=args.max_len,
             tokenizer=tokenizer,
-            # packing=True,
-            # dataset_text_field='text',
             args = training_args,
             formatting_func=CHAT_TEMPLATE_MAPPER[args.model], 
         )    
@@ -324,12 +322,10 @@ if __name__ == '__main__':
     # Model Loading depending on name
     model_path = MODEL_MAPPER[args.model]
     model, tokenizer = get_tok_and_model(model_path)
-    tokenizer.pad_token = tokenizer.unk_token
-
-    # if args.use_flash_attn:
-    #     from utils.llama_patch import upcast_layer_for_flash_attention
-    #     torch_dtype = torch.bfloat16 if args.bf16 else torch.float16 if args.fp16 else torch.float32
-    #     model = upcast_layer_for_flash_attention(model, torch_dtype)
+    if args.model == 'llama3':
+        tokenizer.pad_token = tokenizer.eos_token
+    else:
+        tokenizer.pad_token = tokenizer.unk_token
 
     # get trainer
     trainer = get_trainer(tokenizer, model, args)
