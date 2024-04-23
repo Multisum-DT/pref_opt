@@ -1,5 +1,5 @@
 CUDA_VISIBLE_DEVICES=1 python train.py \
-    --model=llama3 \
+    --model=tinyllama \
     --train_mode=sft \
     --seed=42 \
     --level=sentence \

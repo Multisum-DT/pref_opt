@@ -49,10 +49,36 @@ CHAT_TEMPLATE_MAPPER = {'mistral': apply_chat_template_mistral,
 
 def compute_metrics(eval_preds):
     def split_input_output(string):
-        input_label = string.split('### Input: ')[-1]
-        input_str, label_str = input_label.split('### Output: ')
-        return input_str.strip(), label_str.strip()
-    import ipdb; ipdb.set_trace()
+        input_str, label_str = string.split('[/INST]')
+
+        # Extract the original sentence from the input message to be used for COMET
+        sys_prompt = 'You are a translator. Translate the sentence in French to English. Do not continue writing with anything that is unrelated to the given sentence.'
+        input_str = input_str.replace('<<SYS>>', '').replace('<s><s> [INST] ', '').replace(sys_prompt, '').strip()
+        
+        # Remove any special tokens that are not removed by tokenizer
+        label_str = re.sub('<.*>', '', label_str).strip()
+        return input_str, label_str
+    
+    def split_input_output_tinyllama(string):
+        input_str, label_str = string.split('</s>\n<|assistant|>\n')
+
+        # Extract the original sentence from the input message to be used for COMET
+        input_str = input_str.split('</s>\n<|user|>\n')[-1].strip()
+        
+        # Remove any special tokens that are not removed by tokenizer
+        label_str = re.sub('<.*>', '', label_str).strip()
+        return input_str, label_str
+    
+    def split_input_output_llama3(string):
+        input_str, label_str = string.split('<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n')
+
+        # Extract the original sentence from the input message to be used for COMET
+        input_str = input_str.split('<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n')[-1].strip()
+        
+        # Remove any special tokens that are not removed by tokenizer
+        label_str = re.sub('<.*>', '', label_str).strip()
+        return input_str, label_str
+
     preds, labels = eval_preds.predictions, eval_preds.label_ids
     # In case the model returns more than the prediction logits 
     if isinstance(preds, tuple):
@@ -60,14 +86,24 @@ def compute_metrics(eval_preds):
     preds = preds.argmax(-1)
     preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
     decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
-    decoded_preds = list(map(lambda x: x.split('### Output: ')[-1].strip(), decoded_preds))
+    if 'llama-3' in tokenizer.name_or_path:
+        decoded_preds = list(map(lambda x: x.split('<|start_header_id|>assistant<|end_header_id|>\n\n')[-1].strip(), decoded_preds))    
+    elif 'tinyllama' in tokenizer.name_or_path:
+        decoded_preds = list(map(lambda x: x.split('</s>\n<|assistant|>\n')[-1].strip(), decoded_preds))    
+    else:
+        decoded_preds = list(map(lambda x: x.split('[/INST]')[-1].strip(), decoded_preds))    
     
     # Replace -100s in the labels as we can't decode them
     labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
+    # import ipdb; ipdb.set_trace()
     decoded_labels = tokenizer.batch_decode(labels, skip_spacial_tokens=True)
-    decoded_labels = [re.sub('<.*>', '', label).strip() for label in decoded_labels]
-    decoded_inputs, decoded_labels = zip(*list(map(split_input_output, decoded_labels)))
-    
+    if 'llama-3' in tokenizer.name_or_path:
+        decoded_inputs, decoded_labels = zip(*list(map(split_input_output_llama3, decoded_labels)))
+    elif 'tinyllama' in tokenizer.name_or_path:
+        decoded_inputs, decoded_labels = zip(*list(map(split_input_output_tinyllama, decoded_labels)))
+    else:
+        decoded_inputs, decoded_labels = zip(*list(map(split_input_output, decoded_labels)))
+
     # Some simple post-processing 
     decoded_preds = [pred.strip() for pred in decoded_preds]
     decoded_labels = [label.strip() for label in decoded_labels]
@@ -76,11 +112,9 @@ def compute_metrics(eval_preds):
     # Multiple metrics
     metric = evaluate.combine(['sacrebleu', 'chrf'])
     metric_result = metric.compute(predictions = decoded_preds, references = decoded_labels)
-
-    # Comet requires sources argument, make separate calculation
     comet = evaluate.load('comet')
     metric_result['comet'] = comet.compute(predictions = decoded_preds, references = decoded_labels, sources = decoded_inputs)['mean_score']
-
+    
     return metric_result
 
 def seed_everything(seed: int = 42):
@@ -234,8 +268,8 @@ def get_trainer(tokenizer, model, args):
         # per_device_train_batch_size=4,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         gradient_checkpointing=True if args.gradient_checkpointing else False,
-        bf16=False, # bf16 is not supported by non-Ampere GPUs
-        fp16=True,
+        bf16=True, # bf16 is not supported by non-Ampere GPUs
+        fp16=False,
         tf32=False,
         group_by_length=True, # pad batches by its group, more efficient
         load_best_model_at_end=True,
@@ -247,7 +281,7 @@ def get_trainer(tokenizer, model, args):
     training_args = training_args.set_dataloader(train_batch_size=args.batch_size,
                                                  eval_batch_size=args.batch_size,
                                                  pin_memory=True,
-                                                 num_workers=4,
+                                                 num_workers=0,
                                                  sampler_seed=args.seed,
                                                  auto_find_batch_size=True,)
     training_args = training_args.set_lr_scheduler(name='cosine', num_epochs=args.epochs, warmup_ratio=args.warmup_ratio,)
