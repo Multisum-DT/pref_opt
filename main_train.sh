@@ -1,5 +1,19 @@
-CUDA_VISIBLE_DEVICES=1 python train.py \
-    --model=tinyllama \
+#!/bin/bash
+
+echo "### START DATE=$(date)"
+echo "### HOSTNAME=$(hostname)"
+echo "### CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+ 
+# conda 환경 활성화.
+source  ~/.bashrc
+conda   activate   unsloth_test2
+ 
+# cuda 11.0 환경 구성.
+ml purge
+ml load cuda/11.0
+
+CUDA_VISIBLE_DEVICES=0 python train.py \
+    --model=mistral \
     --train_mode=sft \
     --seed=42 \
     --level=sentence \
@@ -16,4 +30,6 @@ CUDA_VISIBLE_DEVICES=1 python train.py \
     --gradient_accumulation_steps=1 \
     --eval_accumulation_steps=10 \
     --gradient_checkpointing \
-    # --ckpt_dir="/data2/brian/personal/translation/checkpoints/mistral_04092203/checkpoint-50505"
+
+echo "###"
+echo "### END DATE=$(date)"

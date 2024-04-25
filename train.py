@@ -177,7 +177,7 @@ def get_tok_and_model(model_path):
             max_seq_length = 4096,
             dtype = torch.float16,
             load_in_4bit = True,
-            cache_dir = '/data2/brian/.cache'
+            #cache_dir = '/data2/brian/.cache'
         )
         model = FastLanguageModel.get_peft_model(
             model,
@@ -201,7 +201,7 @@ def get_tok_and_model(model_path):
         )
         tokenizer = AutoTokenizer.from_pretrained(
             model_path, 
-            cache_dir = '/data2/brian/.cache'
+            #cache_dir = '/data2/brian/.cache'
             )
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
@@ -210,7 +210,7 @@ def get_tok_and_model(model_path):
             trust_remote_code = True,
             max_length = 4096,
             quantization_config = bnb_config,
-            cache_dir = '/data2/brian/.cache',
+            #cache_dir = '/data2/brian/.cache',
         )
         peft_config = LoraConfig(
             r=args.lora_r,
@@ -241,7 +241,7 @@ def get_trainer(tokenizer, model, args):
                 datasets.Split.VALIDATION: ['newstest2013'],
                 datasets.Split.TEST: ['newstest2014']
             },
-            cache_dir = '/data2/brian/.cache/dataset'
+            #cache_dir = '/data2/brian/.cache/dataset'
         )
         builder.download_and_prepare(verification_mode=VerificationMode.NO_CHECKS)
         dataset = builder.as_dataset()
@@ -268,8 +268,8 @@ def get_trainer(tokenizer, model, args):
         # per_device_train_batch_size=4,
         gradient_accumulation_steps=args.gradient_accumulation_steps,
         gradient_checkpointing=True if args.gradient_checkpointing else False,
-        bf16=True, # bf16 is not supported by non-Ampere GPUs
-        fp16=False,
+        bf16=False, # bf16 is not supported by non-Ampere GPUs
+        fp16=True,
         tf32=False,
         group_by_length=True, # pad batches by its group, more efficient
         load_best_model_at_end=True,
@@ -286,10 +286,11 @@ def get_trainer(tokenizer, model, args):
                                                  auto_find_batch_size=True,)
     training_args = training_args.set_lr_scheduler(name='cosine', num_epochs=args.epochs, warmup_ratio=args.warmup_ratio,)
     training_args = training_args.set_optimizer(name='paged_adamw_8bit', learning_rate=args.learning_rate, weight_decay=args.weight_decay,)
-    training_args = training_args.set_evaluate(strategy = 'steps', steps = 1, delay = 0, accumulation_steps=args.eval_accumulation_steps, batch_size = args.batch_size)
+    training_args = training_args.set_evaluate(strategy = 'steps', steps = eval_steps, delay = 0, accumulation_steps=args.eval_accumulation_steps, batch_size = args.batch_size)
     training_args = training_args.set_save(strategy="steps", steps = eval_steps, total_limit=10)
     training_args = training_args.set_logging(strategy="steps", steps=eval_steps, report_to = ['wandb'])
     
+    os.environ["WANDB_API_KEY"] = '049ae4ba0b1bba160b91fd5b0c2a5a33b55cedfe'
     wandb.init(
         # set the wandb project where this run will be logged
         project="translation-test",
