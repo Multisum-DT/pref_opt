@@ -286,7 +286,7 @@ def get_trainer(tokenizer, model, args):
                                                  auto_find_batch_size=True,)
     training_args = training_args.set_lr_scheduler(name='cosine', num_epochs=args.epochs, warmup_ratio=args.warmup_ratio,)
     training_args = training_args.set_optimizer(name='paged_adamw_8bit', learning_rate=args.learning_rate, weight_decay=args.weight_decay,)
-    training_args = training_args.set_evaluate(strategy = 'steps', steps = 1, delay = 0, accumulation_steps=args.eval_accumulation_steps, batch_size = args.batch_size)
+    training_args = training_args.set_evaluate(strategy = 'steps', steps = eval_steps, delay = 0, accumulation_steps=args.eval_accumulation_steps, batch_size = args.batch_size)
     training_args = training_args.set_save(strategy="steps", steps = eval_steps, total_limit=10)
     training_args = training_args.set_logging(strategy="steps", steps=eval_steps, report_to = ['wandb'])
     
