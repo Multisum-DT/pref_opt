@@ -4,11 +4,13 @@ import re
 import os
 import random
 import numpy as np
+import pandas as pd
 import torch
 import wandb
 import datasets
 import evaluate
 from datetime import datetime
+from tqdm import tqdm
 
 from datasets import load_dataset, load_dataset_builder, Dataset, VerificationMode
 from peft import (
@@ -21,12 +23,13 @@ from transformers import (
     AutoTokenizer,
     AutoModelForCausalLM,
     BitsAndBytesConfig,
+    GenerationConfig,
     TrainingArguments,
-    Trainer
+    Trainer,
 )
-from trl import SFTTrainer, DPOTrainer, CPOTrainer, ORPOTrainer, CPOConfig
+from transformers.integrations import WandbCallback
+from trl import SFTTrainer, DPOTrainer, CPOTrainer, ORPOTrainer, CPOConfig, ORPOConfig
 from unsloth import FastLanguageModel
-from datasets import load_metric
 from utils import *
 
 os.environ["WANDB_API_KEY"] = 'e0079cf04794e1722592862727127f5711144304'
@@ -52,8 +55,8 @@ def compute_metrics(eval_preds):
         input_str, label_str = string.split('[/INST]')
 
         # Extract the original sentence from the input message to be used for COMET
-        sys_prompt = 'You are a translator. Translate the sentence in French to English. Do not continue writing with anything that is unrelated to the given sentence.'
-        input_str = input_str.replace('<<SYS>>', '').replace('<s><s> [INST] ', '').replace(sys_prompt, '').strip()
+        sys_prompt = 'You are a translator. Translate the sentence in French to English. Directly start translating without answering back. Do not continue writing with anything that is unrelated to the given sentence.'
+        input_str = input_str.replace('<<SYS>>', '').replace('<</SYS>>', '').replace('<s><s> [INST] ', '').replace(sys_prompt, '').strip()
         
         # Remove any special tokens that are not removed by tokenizer
         label_str = re.sub('<.*>', '', label_str).strip()
@@ -78,20 +81,21 @@ def compute_metrics(eval_preds):
         # Remove any special tokens that are not removed by tokenizer
         label_str = re.sub('<.*>', '', label_str).strip()
         return input_str, label_str
-
+    
     preds, labels = eval_preds.predictions, eval_preds.label_ids
     # In case the model returns more than the prediction logits 
     if isinstance(preds, tuple):
         preds = preds[0]
     preds = preds.argmax(-1)
     preds = np.where(preds != -100, preds, tokenizer.pad_token_id)
+    preds = np.where(preds != 30488, preds, tokenizer.pad_token_id)
     decoded_preds = tokenizer.batch_decode(preds, skip_special_tokens=True)
     if 'llama-3' in tokenizer.name_or_path:
         decoded_preds = list(map(lambda x: x.split('<|start_header_id|>assistant<|end_header_id|>\n\n')[-1].strip(), decoded_preds))    
     elif 'tinyllama' in tokenizer.name_or_path:
         decoded_preds = list(map(lambda x: x.split('</s>\n<|assistant|>\n')[-1].strip(), decoded_preds))    
     else:
-        decoded_preds = list(map(lambda x: x.split('[/INST]')[-1].strip(), decoded_preds))    
+        decoded_preds = list(map(lambda x: x.split('[/INST]')[-1].strip(), decoded_preds))
     
     # Replace -100s in the labels as we can't decode them
     labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
@@ -169,6 +173,20 @@ def parse_args():
     parser.add_argument("--eval_accumulation_steps", type=int, default = 0, help="reduces required memory size but slows training")
     
     return parser.parse_args()
+
+def apply_po_template(model_name, df):
+    sys_prompt = "You are a translator. Translate the sentence in French to English. Directly start translating without answering back. Do not continue writing with anything that is unrelated to the given sentence."
+    templates = {
+        'llama': f"<s>[INST] <<SYS>>\n{sys_prompt}\n<</SYS>>\n\n%s [/INST]",
+        'mistral': f"<s>[INST] {sys_prompt} %s [/INST] ",
+        'tinyllama': f"<|system|>\n{sys_prompt}</s>\n<|user|>\n%s</s>\n<|assistant|>\n",
+        'llama3': f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{sys_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n%s<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
+    }
+    eos_token = '<|eot_id|>' if model_name == 'llama3' else '</s>'
+    df['prompt'] = df['prompt'].map(lambda x: templates[model_name] % x)
+    df['chosen'] = df['prompt'] + df['chosen'] + eos_token
+    df['rejected'] = df['prompt'] + df['rejected'] + eos_token
+    return Dataset.from_pandas(df)
 
 def get_tok_and_model(model_path):
     if args.model in ['mistral', 'llama', 'gemma', 'tinyllama']:
@@ -251,7 +269,23 @@ def get_trainer(tokenizer, model, args):
         del builder, dataset
         gc.collect()
     else:
-        pass # TODO: ADD PO DATASET
+        # REMOVE
+        dataset = load_dataset('argilla/ultrafeedback-binarized-preferences-cleaned', cache_dir='/data2/brian/.cache/dataset')['train'] # prompt, chosen, rejected
+        dataset = Dataset.from_dict({
+            'prompt': dataset['prompt'],
+            'chosen': [tokenizer.apply_chat_template(sample, tokenize = False) for sample in dataset['chosen']],
+            'rejected': [tokenizer.apply_chat_template(sample, tokenize = False) for sample in dataset['rejected']],
+        })
+
+        # TODO: add apply_chat_template func for translation dataset
+        df = pd.read_csv('')
+        dataset = apply_po_template(args.model, df)
+        split_set = dataset.train_test_split(test_size=0.1)
+        
+        train_dataset = split_set['train']
+        eval_dataset = split_set['test']
+        del split_set
+        gc.collect()
         
     # create trainer for peft model
     time_now = datetime.today().strftime('%m%d%H%M')
@@ -259,36 +293,95 @@ def get_trainer(tokenizer, model, args):
     eval_steps=int(total_update_steps/(args.epochs*args.num_save_per_epoch))
 
     output_dir = f'checkpoints/{args.model}_{time_now}'
+    group_by_length = True if args.train_mode == 'sft' else False
+    generate_during_eval = False # if args.train_mode == 'sft' else True
+    
+    if args.train_mode == 'cpo':
+        training_args = CPOConfig(
+            output_dir = output_dir,
+            num_train_epochs=args.epochs,
+            evaluation_strategy='steps',
+            metric_for_best_model='eval_loss',
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
+            gradient_checkpointing=True if args.gradient_checkpointing else False,
+            bf16=True, # bf16 is not supported by non-Ampere GPUs
+            fp16=False,
+            tf32=False,
+            group_by_length=group_by_length, # pad batches by its group, more efficient
+            load_best_model_at_end=True,
+            report_to = 'wandb',
+            generate_during_eval=generate_during_eval,
+            # include_inputs_for_metrics=True,
+        )
+        training_args = training_args.set_dataloader(train_batch_size=args.batch_size,
+                                                    eval_batch_size=args.batch_size,
+                                                    pin_memory=True,
+                                                    num_workers=0,
+                                                    sampler_seed=args.seed,
+                                                    auto_find_batch_size=True,)
+        training_args = training_args.set_lr_scheduler(name='cosine', num_epochs=args.epochs, warmup_ratio=args.warmup_ratio,)
+        training_args = training_args.set_optimizer(name='paged_adamw_8bit', learning_rate=args.learning_rate, weight_decay=args.weight_decay,)
+        training_args = training_args.set_evaluate(strategy = 'steps', steps = eval_steps, delay = 0, accumulation_steps=args.eval_accumulation_steps, batch_size = args.batch_size)
+        training_args = training_args.set_save(strategy="steps", steps = eval_steps, total_limit=10)
+        training_args = training_args.set_logging(strategy="steps", steps=eval_steps, report_to = ['wandb'])
+    elif args.train_mode == 'orpo':
+        training_args = ORPOConfig(
+            output_dir = output_dir,
+            num_train_epochs=args.epochs,
+            evaluation_strategy='steps',
+            metric_for_best_model='eval_loss',
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
+            gradient_checkpointing=True if args.gradient_checkpointing else False,
+            bf16=True, # bf16 is not supported by non-Ampere GPUs
+            fp16=False,
+            tf32=False,
+            group_by_length=group_by_length, # pad batches by its group, more efficient
+            load_best_model_at_end=True,
+            report_to = 'wandb',
+            generate_during_eval=generate_during_eval,
+            # include_inputs_for_metrics=True,
+        )
+        training_args = training_args.set_dataloader(train_batch_size=args.batch_size,
+                                                    eval_batch_size=args.batch_size,
+                                                    pin_memory=True,
+                                                    num_workers=0,
+                                                    sampler_seed=args.seed,
+                                                    auto_find_batch_size=True,)
+        training_args = training_args.set_lr_scheduler(name='cosine', num_epochs=args.epochs, warmup_ratio=args.warmup_ratio,)
+        training_args = training_args.set_optimizer(name='paged_adamw_8bit', learning_rate=args.learning_rate, weight_decay=args.weight_decay,)
+        training_args = training_args.set_evaluate(strategy = 'steps', steps = eval_steps, delay = 0, accumulation_steps=args.eval_accumulation_steps, batch_size = args.batch_size)
+        training_args = training_args.set_save(strategy="steps", steps = eval_steps, total_limit=10)
+        training_args = training_args.set_logging(strategy="steps", steps=eval_steps, report_to = ['wandb'])
+    else:
+        training_args = TrainingArguments(
+            output_dir = output_dir,
+            num_train_epochs=args.epochs,
+            evaluation_strategy='steps',
+            metric_for_best_model='eval_loss',
+            gradient_accumulation_steps=args.gradient_accumulation_steps,
+            gradient_checkpointing=True if args.gradient_checkpointing else False,
+            bf16=True, # bf16 is not supported by non-Ampere GPUs
+            fp16=False,
+            tf32=False,
+            group_by_length=group_by_length, # pad batches by its group, more efficient
+            load_best_model_at_end=True,
+            report_to = 'wandb',
+            generate_during_eval=generate_during_eval,
+            # include_inputs_for_metrics=True,
+            # disable_tqdm=False,  # disable tqdm since with packing values are incorrect
+        )
 
-    training_args = TrainingArguments(
-        output_dir = output_dir,
-        num_train_epochs=args.epochs,
-        evaluation_strategy='steps',
-        metric_for_best_model='eval_loss',
-        # per_device_train_batch_size=4,
-        gradient_accumulation_steps=args.gradient_accumulation_steps,
-        gradient_checkpointing=True if args.gradient_checkpointing else False,
-        bf16=True, # bf16 is not supported by non-Ampere GPUs
-        fp16=False,
-        tf32=False,
-        group_by_length=True, # pad batches by its group, more efficient
-        load_best_model_at_end=True,
-        report_to = 'wandb',
-        include_inputs_for_metrics=True,
-        # disable_tqdm=False,  # disable tqdm since with packing values are in correct
-    )
-
-    training_args = training_args.set_dataloader(train_batch_size=args.batch_size,
-                                                 eval_batch_size=args.batch_size,
-                                                 pin_memory=True,
-                                                 num_workers=0,
-                                                 sampler_seed=args.seed,
-                                                 auto_find_batch_size=True,)
-    training_args = training_args.set_lr_scheduler(name='cosine', num_epochs=args.epochs, warmup_ratio=args.warmup_ratio,)
-    training_args = training_args.set_optimizer(name='paged_adamw_8bit', learning_rate=args.learning_rate, weight_decay=args.weight_decay,)
-    training_args = training_args.set_evaluate(strategy = 'steps', steps = eval_steps, delay = 0, accumulation_steps=args.eval_accumulation_steps, batch_size = args.batch_size)
-    training_args = training_args.set_save(strategy="steps", steps = eval_steps, total_limit=10)
-    training_args = training_args.set_logging(strategy="steps", steps=eval_steps, report_to = ['wandb'])
+        training_args = training_args.set_dataloader(train_batch_size=args.batch_size,
+                                                    eval_batch_size=args.batch_size,
+                                                    pin_memory=True,
+                                                    num_workers=0,
+                                                    sampler_seed=args.seed,
+                                                    auto_find_batch_size=True,)
+        training_args = training_args.set_lr_scheduler(name='cosine', num_epochs=args.epochs, warmup_ratio=args.warmup_ratio,)
+        training_args = training_args.set_optimizer(name='paged_adamw_8bit', learning_rate=args.learning_rate, weight_decay=args.weight_decay,)
+        training_args = training_args.set_evaluate(strategy = 'steps', steps = 1, delay = 0, accumulation_steps=args.eval_accumulation_steps, batch_size = args.batch_size)
+        training_args = training_args.set_save(strategy="steps", steps = eval_steps, total_limit=10)
+        training_args = training_args.set_logging(strategy="steps", steps=eval_steps, report_to = ['wandb'])
     
     wandb.init(
         # set the wandb project where this run will be logged
@@ -297,33 +390,42 @@ def get_trainer(tokenizer, model, args):
         # track hyperparameters and run metadata
         config=training_args.__dict__
     )
-    wandb.run.name = f"{args.model}_{time_now}"
+    wandb.run.name = f"{args.model}_{args.train_mode}_{time_now}"
     
     # train
     if args.train_mode == 'dpo':
         trainer = DPOTrainer(
             model=model,
-            ref_model = None,
+            ref_model=None,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
-            compute_metrics=compute_metrics,
-            max_seq_length=args.max_len,
+            compute_metrics=None,
             tokenizer=tokenizer,
             args = training_args,
-            formatting_func=CHAT_TEMPLATE_MAPPER[args.model], 
+            # formatting_func=CHAT_TEMPLATE_MAPPER[args.model], 
         )
     elif args.train_mode == 'cpo':
-        pass # TODO
+        trainer = CPOTrainer(
+            model=model,
+            train_dataset=train_dataset,
+            eval_dataset=eval_dataset,
+            compute_metrics=None,
+            max_length=args.max_len,
+            max_prompt_length=1024,
+            tokenizer=tokenizer,
+            args=training_args,
+            # formatting_func=CHAT_TEMPLATE_MAPPER[args.model],
+        )
     elif args.train_mode == 'orpo':
         trainer = ORPOTrainer(
             model=model,
             train_dataset=train_dataset,
             eval_dataset=eval_dataset,
-            compute_metrics=compute_metrics,
-            max_seq_length=args.max_len,
+            # max_length=args.max_len,
+            compute_metrics=None,
             tokenizer=tokenizer,
             args = training_args,
-            formatting_func=CHAT_TEMPLATE_MAPPER[args.model],
+            # formatting_func=CHAT_TEMPLATE_MAPPER[args.model],
         )
     else:
         trainer = SFTTrainer(
