@@ -1,6 +1,6 @@
 CUDA_VISIBLE_DEVICES=1 python train.py \
     --model=llama2 \
-    --train_mode=sft \
+    --train_mode=orpo \
     --seed=42 \
     --level=sentence \
     --epochs=1 \
@@ -16,4 +16,4 @@ CUDA_VISIBLE_DEVICES=1 python train.py \
     --gradient_accumulation_steps=1 \
     --eval_accumulation_steps=10 \
     --gradient_checkpointing \
-    # --ckpt_dir="/data2/brian/personal/translation/checkpoints/mistral_04092203/checkpoint-50505"
+    # --ckpt_dir="/data2/brian/personal/translation/checkpoints/llama2_04240005/checkpoint-38220"
