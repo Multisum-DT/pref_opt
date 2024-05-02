@@ -195,7 +195,7 @@ def get_tok_and_model(model_path):
             max_seq_length = 4096,
             dtype = torch.float16,
             load_in_4bit = True,
-            cache_dir = '/data2/brian/.cache'
+            #cache_dir = '/data2/brian/.cache'
         )
         model = FastLanguageModel.get_peft_model(
             model,
@@ -219,7 +219,7 @@ def get_tok_and_model(model_path):
         )
         tokenizer = AutoTokenizer.from_pretrained(
             model_path, 
-            cache_dir = '/data2/brian/.cache'
+            #cache_dir = '/data2/brian/.cache'
             )
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
@@ -228,7 +228,7 @@ def get_tok_and_model(model_path):
             trust_remote_code = True,
             max_length = 4096,
             quantization_config = bnb_config,
-            cache_dir = '/data2/brian/.cache',
+            #cache_dir = '/data2/brian/.cache',
         )
         peft_config = LoraConfig(
             r=args.lora_r,
@@ -259,7 +259,7 @@ def get_trainer(tokenizer, model, args):
                 datasets.Split.VALIDATION: ['newstest2013'],
                 datasets.Split.TEST: ['newstest2014']
             },
-            cache_dir = '/data2/brian/.cache/dataset'
+            #cache_dir = '/data2/brian/.cache/dataset'
         )
         builder.download_and_prepare(verification_mode=VerificationMode.NO_CHECKS)
         dataset = builder.as_dataset()
@@ -383,6 +383,7 @@ def get_trainer(tokenizer, model, args):
         training_args = training_args.set_save(strategy="steps", steps = eval_steps, total_limit=10)
         training_args = training_args.set_logging(strategy="steps", steps=eval_steps, report_to = ['wandb'])
     
+    os.environ["WANDB_API_KEY"] = '049ae4ba0b1bba160b91fd5b0c2a5a33b55cedfe'
     wandb.init(
         # set the wandb project where this run will be logged
         project="translation-test",
