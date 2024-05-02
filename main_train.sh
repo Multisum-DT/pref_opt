@@ -1,3 +1,4 @@
+<<<<<<< HEAD
 #!/bin/bash
 
 echo "### START DATE=$(date)"
@@ -14,6 +15,10 @@ ml load cuda/11.0
 
 CUDA_VISIBLE_DEVICES=0 python train.py \
     --model=mistral \
+=======
+CUDA_VISIBLE_DEVICES=1 python train.py \
+    --model=llama2 \
+>>>>>>> 645073152ed2a90f7d0a8d06480241e07b7accf9
     --train_mode=sft \
     --seed=42 \
     --level=sentence \
