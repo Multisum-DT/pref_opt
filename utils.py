@@ -38,9 +38,9 @@ def source_dataset(dataset_path):
 
 def apply_chat_template_llama(batch):
     samples = []
-    system_message = "You are a translator. Translate the sentence in French to English. Directly start translating without answering back. Do not continue writing with anything that is unrelated to the given sentence."
+    sys_prompt = "You are a translator. Translate the sentence in French to English. Directly start translating without answering back. Do not continue writing with anything that is unrelated to the given sentence."
     for i in range(len(batch['translation'])):
-       samples.append(f"""<s>[INST] <<SYS>>\n{system_message}\n<</SYS>>\n\n{batch['translation'][i]['fr']} [/INST]{batch['translation'][i]['en']}</s>""")
+       samples.append(f"""<s>[INST] <<SYS>>\n{sys_prompt}\n<</SYS>>\n\n{batch['translation'][i]['fr']} [/INST]{batch['translation'][i]['en']}</s>""")
     return samples
 
 def apply_chat_template_mistral(batch):
@@ -62,6 +62,46 @@ def apply_chat_template_llama3(batch):
    samples = []
    for i in range(len(batch['translation'])):
       samples.append(f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{sys_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{batch['translation'][i]['fr']}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{batch['translation'][i]['en']}<|eot_id|>")
+   return samples
+
+def apply_chat_template_llama_po(batch):
+    samples = []
+    system_message = "You are a translator. Translate the sentence in French to English. Directly start translating without answering back. Do not continue writing with anything that is unrelated to the given sentence."
+    for i in range(len(batch)):
+      samples.append({'prompt': batch[i]['prompt'],
+                      'chosen': batch[i]['chosen'],
+                      'rejected': batch[i]['rejected']})
+      #  samples.append(f"""<s>[INST] <<SYS>>\n{system_message}\n<</SYS>>\n\n{batch['translation'][i]['fr']} [/INST]{batch['translation'][i]['en']}</s>""")
+    return samples
+
+def apply_chat_template_mistral_po(batch):
+   sys_prompt = 'You are a translator. Translate the sentence in French to English. Directly start translating without answering back. Do not continue writing with anything that is unrelated to the given sentence.'
+   samples = []
+   for i in range(len(batch['translation'])):
+      samples.append({'prompt': batch[i]['prompt'],
+                      'chosen': batch[i]['chosen'],
+                      'rejected': batch[i]['rejected']})
+      # samples.append(f"<s>[INST] {sys_prompt} {batch['translation'][i]['fr']} [/INST] {batch['translation'][i]['en']}</s>")
+   return samples
+
+def apply_chat_template_tinyllama_po(batch):
+   sys_prompt = 'You are a translator. Translate the sentence in French to English. Directly start translating without answering back. Do not continue writing with anything that is unrelated to the given sentence.'
+   samples = []
+   for i in range(len(batch['translation'])):
+      samples.append({'prompt': batch[i]['prompt'],
+                      'chosen': batch[i]['chosen'],
+                      'rejected': batch[i]['rejected']})
+      # samples.append(f"<|system|>\n{sys_prompt}</s>\n<|user|>\n{batch['translation'][i]['fr']}</s>\n<|assistant|>\n{batch['translation'][i]['en']}</s>")
+   return samples
+
+def apply_chat_template_llama3_po(batch):
+   sys_prompt = 'You are a translator. Translate the sentence in French to English. Directly start translating without answering back. Do not continue writing with anything that is unrelated to the given sentence.'
+   samples = []
+   for i in range(len(batch['translation'])):
+      samples.append({'prompt': batch[i]['prompt'],
+                      'chosen': batch[i]['chosen'],
+                      'rejected': batch[i]['rejected']})
+      # samples.append(f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{sys_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n{batch['translation'][i]['fr']}<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n{batch['translation'][i]['en']}<|eot_id|>")
    return samples
 
 def return_prompt_and_responses(batch):
