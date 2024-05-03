@@ -310,7 +310,7 @@ def get_trainer(tokenizer, model, args):
     total_update_steps=int((len(train_dataset)*args.epochs)/(args.batch_size*args.gradient_accumulation_steps))
     eval_steps=int(total_update_steps/(args.epochs*args.num_save_per_epoch))
 
-    output_dir = f'checkpoints/{args.model}_{time_now}'
+    output_dir = f'checkpoints/{args.model}_{args.train_mode}_{time_now}'
     group_by_length = True if args.train_mode == 'sft' else False
     generate_during_eval = False # if args.train_mode == 'sft' else True
     
