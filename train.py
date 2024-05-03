@@ -28,7 +28,15 @@ from transformers import (
     Trainer,
 )
 from transformers.integrations import WandbCallback
-from trl import SFTTrainer, DPOTrainer, CPOTrainer, ORPOTrainer, CPOConfig, ORPOConfig
+from trl import (
+    SFTTrainer,
+    DPOTrainer,
+    CPOTrainer,
+    ORPOTrainer, 
+    CPOConfig, 
+    ORPOConfig,
+    DataCollatorForCompletionOnlyLM,
+)
 from unsloth import FastLanguageModel
 from utils import *
 
@@ -177,12 +185,12 @@ def apply_po_template(model_name, df):
     sys_prompt = "You are a translator. Translate the sentence in French to English. Directly start translating without answering back. Do not continue writing with anything that is unrelated to the given sentence."
     templates = {
         'llama2': f"<s>[INST] <<SYS>>\n{sys_prompt}\n<</SYS>>\n\n%s [/INST]",
-        'mistral': f"<s>[INST] {sys_prompt} %s [/INST] ",
-        'gemma': f"<s>[INST] {sys_prompt} %s [/INST] ", 
-        'bloomz7b': f"<s>[INST] {sys_prompt} %s [/INST] ",
-        'bloomz1b': f"<s>[INST] {sys_prompt} %s [/INST] ",
-        'tinyllama': f"<|system|>\n{sys_prompt}</s>\n<|user|>\n%s</s>\n<|assistant|>\n",
-        'llama3': f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{sys_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n%s<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
+        'mistral': f"<s>[INST] {sys_prompt} %s [/INST]",
+        'gemma': f"<s>[INST] {sys_prompt} %s [/INST]", 
+        'bloomz7b': f"<s>[INST] {sys_prompt} %s [/INST]",
+        'bloomz1b': f"<s>[INST] {sys_prompt} %s [/INST]",
+        'tinyllama': f"<|system|>\n{sys_prompt}</s>\n<|user|>\n%s</s>",
+        'llama3': f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{sys_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n%s<|eot_id|>",
     }
     
     eos_token = '<|eot_id|>' if model_name == 'llama3' else '</s>'
@@ -288,7 +296,15 @@ def get_trainer(tokenizer, model, args):
         train_dataset = apply_po_template(args.model, train_df)
         eval_dataset = apply_po_template(args.model, eval_df)
         # test_dataset = apply_po_template(args.model, test_df)
-        
+    
+    if args.model == 'llama3':
+        response_template = '<|start_header_id|>assistant<|end_header_id|>\n\n'
+    elif args.model == 'tinyllama':
+        response_template = '\n<|assistant|>\n'
+    else:
+        response_template = ''
+    data_collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer = tokenizer)
+
     # create trainer for peft model
     time_now = datetime.today().strftime('%m%d%H%M')
     total_update_steps=int((len(train_dataset)*args.epochs)/(args.batch_size*args.gradient_accumulation_steps))
@@ -439,6 +455,7 @@ def get_trainer(tokenizer, model, args):
             max_seq_length=args.max_len,
             tokenizer=tokenizer,
             args = training_args,
+            data_collator = data_collator,
             formatting_func=CHAT_TEMPLATE_MAPPER[args.model], 
         )    
     if not os.path.exists(output_dir):
