@@ -99,7 +99,6 @@ def compute_metrics(eval_preds):
     
     # Replace -100s in the labels as we can't decode them
     labels = np.where(labels != -100, labels, tokenizer.pad_token_id)
-    # import ipdb; ipdb.set_trace()
     decoded_labels = tokenizer.batch_decode(labels, skip_spacial_tokens=True)
     if 'llama-3' in tokenizer.name_or_path:
         decoded_inputs, decoded_labels = zip(*list(map(split_input_output_llama3, decoded_labels)))
@@ -177,11 +176,15 @@ def parse_args():
 def apply_po_template(model_name, df):
     sys_prompt = "You are a translator. Translate the sentence in French to English. Directly start translating without answering back. Do not continue writing with anything that is unrelated to the given sentence."
     templates = {
-        'llama': f"<s>[INST] <<SYS>>\n{sys_prompt}\n<</SYS>>\n\n%s [/INST]",
+        'llama2': f"<s>[INST] <<SYS>>\n{sys_prompt}\n<</SYS>>\n\n%s [/INST]",
         'mistral': f"<s>[INST] {sys_prompt} %s [/INST] ",
+        'gemma': f"<s>[INST] {sys_prompt} %s [/INST] ", 
+        'bloomz7b': f"<s>[INST] {sys_prompt} %s [/INST] ",
+        'bloomz1b': f"<s>[INST] {sys_prompt} %s [/INST] ",
         'tinyllama': f"<|system|>\n{sys_prompt}</s>\n<|user|>\n%s</s>\n<|assistant|>\n",
         'llama3': f"<|begin_of_text|><|start_header_id|>system<|end_header_id|>\n\n{sys_prompt}<|eot_id|><|start_header_id|>user<|end_header_id|>\n\n%s<|eot_id|><|start_header_id|>assistant<|end_header_id|>\n\n",
     }
+    
     eos_token = '<|eot_id|>' if model_name == 'llama3' else '</s>'
     df['prompt'] = df['prompt'].map(lambda x: templates[model_name] % x)
     df['chosen'] = df['prompt'] + df['chosen'] + eos_token
@@ -195,7 +198,7 @@ def get_tok_and_model(model_path):
             max_seq_length = 4096,
             dtype = torch.float16,
             load_in_4bit = True,
-            #cache_dir = '/data2/brian/.cache'
+            cache_dir = '/data2/brian/.cache'
         )
         model = FastLanguageModel.get_peft_model(
             model,
@@ -219,7 +222,7 @@ def get_tok_and_model(model_path):
         )
         tokenizer = AutoTokenizer.from_pretrained(
             model_path, 
-            #cache_dir = '/data2/brian/.cache'
+            cache_dir = '/data2/brian/.cache'
             )
         model = AutoModelForCausalLM.from_pretrained(
             model_path,
@@ -228,7 +231,7 @@ def get_tok_and_model(model_path):
             trust_remote_code = True,
             max_length = 4096,
             quantization_config = bnb_config,
-            #cache_dir = '/data2/brian/.cache',
+            cache_dir = '/data2/brian/.cache',
         )
         peft_config = LoraConfig(
             r=args.lora_r,
@@ -259,7 +262,7 @@ def get_trainer(tokenizer, model, args):
                 datasets.Split.VALIDATION: ['newstest2013'],
                 datasets.Split.TEST: ['newstest2014']
             },
-            #cache_dir = '/data2/brian/.cache/dataset'
+            cache_dir = '/data2/brian/.cache/dataset'
         )
         builder.download_and_prepare(verification_mode=VerificationMode.NO_CHECKS)
         dataset = builder.as_dataset()
@@ -270,22 +273,21 @@ def get_trainer(tokenizer, model, args):
         gc.collect()
     else:
         # REMOVE
-        dataset = load_dataset('argilla/ultrafeedback-binarized-preferences-cleaned', cache_dir='/data2/brian/.cache/dataset')['train'] # prompt, chosen, rejected
-        dataset = Dataset.from_dict({
-            'prompt': dataset['prompt'],
-            'chosen': [tokenizer.apply_chat_template(sample, tokenize = False) for sample in dataset['chosen']],
-            'rejected': [tokenizer.apply_chat_template(sample, tokenize = False) for sample in dataset['rejected']],
-        })
+        # dataset = load_dataset('argilla/ultrafeedback-binarized-preferences-cleaned', cache_dir='/data2/brian/.cache/dataset')['train'] # prompt, chosen, rejected
+        # dataset = Dataset.from_dict({
+        #     'prompt': dataset['prompt'],
+        #     'chosen': [tokenizer.apply_chat_template(sample, tokenize = False) for sample in dataset['chosen']],
+        #     'rejected': [tokenizer.apply_chat_template(sample, tokenize = False) for sample in dataset['rejected']],
+        # })
 
         # TODO: add apply_chat_template func for translation dataset
-        df = pd.read_csv('')
-        dataset = apply_po_template(args.model, df)
-        split_set = dataset.train_test_split(test_size=0.1)
-        
-        train_dataset = split_set['train']
-        eval_dataset = split_set['test']
-        del split_set
-        gc.collect()
+        train_df = pd.read_csv('po_valid_processing.csv')
+        eval_df = pd.read_csv('po_valid_processing.csv')
+        # test_df = pd.read_csv('po_valid_processing.csv')
+
+        train_dataset = apply_po_template(args.model, train_df)
+        eval_dataset = apply_po_template(args.model, eval_df)
+        # test_dataset = apply_po_template(args.model, test_df)
         
     # create trainer for peft model
     time_now = datetime.today().strftime('%m%d%H%M')
@@ -379,7 +381,7 @@ def get_trainer(tokenizer, model, args):
                                                     auto_find_batch_size=True,)
         training_args = training_args.set_lr_scheduler(name='cosine', num_epochs=args.epochs, warmup_ratio=args.warmup_ratio,)
         training_args = training_args.set_optimizer(name='paged_adamw_8bit', learning_rate=args.learning_rate, weight_decay=args.weight_decay,)
-        training_args = training_args.set_evaluate(strategy = 'steps', steps = 1, delay = 0, accumulation_steps=args.eval_accumulation_steps, batch_size = args.batch_size)
+        training_args = training_args.set_evaluate(strategy = 'steps', steps = eval_steps, delay = 0, accumulation_steps=args.eval_accumulation_steps, batch_size = args.batch_size)
         training_args = training_args.set_save(strategy="steps", steps = eval_steps, total_limit=10)
         training_args = training_args.set_logging(strategy="steps", steps=eval_steps, report_to = ['wandb'])
     
