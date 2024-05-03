@@ -1,9 +1,9 @@
-CUDA_VISIBLE_DEVICES=1 python train.py \
+CUDA_VISIBLE_DEVICES=0 python train.py \
     --model=llama2 \
-    --train_mode=orpo \
+    --train_mode=sft \
     --seed=42 \
     --level=sentence \
-    --epochs=1 \
+    --epochs=2 \
     --max_len=4096 \
     --lora_r=64 \
     --lora_alpha=32 \

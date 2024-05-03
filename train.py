@@ -194,7 +194,7 @@ def apply_po_template(model_name, df):
     }
     
     eos_token = '<|eot_id|>' if model_name == 'llama3' else '</s>'
-    df['prompt'] = df['prompt'].map(lambda x: templates[model_name] % x)
+    df['prompt'] = df['prompt'].map(lambda x: VAL_TEMPLATE[model_name] % x)
     df['chosen'] = df['prompt'] + df['chosen'] + eos_token
     df['rejected'] = df['prompt'] + df['rejected'] + eos_token
     return Dataset.from_pandas(df)
@@ -274,9 +274,20 @@ def get_trainer(tokenizer, model, args):
         )
         builder.download_and_prepare(verification_mode=VerificationMode.NO_CHECKS)
         dataset = builder.as_dataset()
-        train_dataset = dataset['train']
-        eval_dataset = dataset['validation']
-        test_dataset = dataset['test']
+
+        def insert_text(samples, template):
+            import ipdb; ipdb.set_trace()
+            samples['text'] = template(samples['translation'])
+            return samples
+        
+        train_dataset = dataset['train'].map(insert_text, fn_kwargs = {'template': CHAT_TEMPLATE_MAPPER[args.model]})
+        eval_dataset = dataset['validation'].map(insert_text, fn_kwargs = {'template': CHAT_TEMPLATE_MAPPER[args.model]})
+        test_dataset = dataset['test'].map(insert_text, fn_kwargs = {'template': CHAT_TEMPLATE_MAPPER[args.model]})
+
+        train_dataset=tokenize_dataset(train_dataset,tokenizer,args.max_len)
+        valid_dataset=tokenize_dataset(valid_dataset,tokenizer,args.max_len)
+        test_dataset=tokenize_dataset(test_dataset,tokenizer,args.max_len)
+        
         del builder, dataset
         gc.collect()
     else:
@@ -303,7 +314,7 @@ def get_trainer(tokenizer, model, args):
         response_template = '\n<|assistant|>\n'
     else:
         response_template = ''
-    data_collator = DataCollatorForCompletionOnlyLM(response_template, tokenizer = tokenizer)
+    data_collator = DataCollatorForCompletionOnlyLM(tokenizer(response_template, add_special_tokens = False), tokenizer = tokenizer)
 
     # create trainer for peft model
     time_now = datetime.today().strftime('%m%d%H%M')
@@ -384,7 +395,7 @@ def get_trainer(tokenizer, model, args):
             group_by_length=group_by_length, # pad batches by its group, more efficient
             load_best_model_at_end=True,
             report_to = 'wandb',
-            generate_during_eval=generate_during_eval,
+            #generate_during_eval=generate_during_eval,
             # include_inputs_for_metrics=True,
             # disable_tqdm=False,  # disable tqdm since with packing values are incorrect
         )
@@ -456,7 +467,8 @@ def get_trainer(tokenizer, model, args):
             tokenizer=tokenizer,
             args = training_args,
             data_collator = data_collator,
-            formatting_func=CHAT_TEMPLATE_MAPPER[args.model], 
+            formatting_func=CHAT_TEMPLATE_MAPPER[args.model],
+            dataset_text_field="text",
         )    
     if not os.path.exists(output_dir):
         os.makedirs(output_dir, exist_ok=True)
